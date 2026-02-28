@@ -53,10 +53,17 @@ avg_loss_per_week = total_loss / (days / 7) if days > 0 else 0
 
 # ── Header ──────────────────────────────────────────────────────────────────
 st.title("⚖️ AB's Transformation Journey - Weight Tracker")
-st.caption(
-    f"Journey from {df['Date'].iloc[0].strftime('%b %d, %Y')} "
-    f"to {df['Date'].iloc[-1].strftime('%b %d, %Y')} · {days} days"
-)
+
+col_caption, col_refresh = st.columns([6, 1])
+with col_caption:
+    st.caption(
+        f"Journey from {df['Date'].iloc[0].strftime('%b %d, %Y')} "
+        f"to {df['Date'].iloc[-1].strftime('%b %d, %Y')} · {days} days"
+    )
+with col_refresh:
+    if st.button("⟳ Refresh", use_container_width=True):
+        load_data.clear()
+        st.rerun()
 
 # ── Metric cards ─────────────────────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
