@@ -128,9 +128,9 @@ fig_daily.update_layout(
     xaxis_title="Date",
     yaxis_title="Weight (kg)",
     hovermode="x unified",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
     height=420,
-    margin=dict(t=10),
+    margin=dict(t=10, b=60),
 )
 st.plotly_chart(fig_daily, use_container_width=True)
 
