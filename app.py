@@ -58,7 +58,7 @@ def load_data(cache_buster: int = 0) -> pd.DataFrame:
     df.index.name = "Date"
 
     # Clip to today (AEST = UTC+10) — ignore future-dated entries
-    today_aest = (pd.Timestamp.utcnow() + pd.Timedelta(hours=10)).normalize()
+    today_aest = (pd.Timestamp.now('UTC').replace(tzinfo=None) + pd.Timedelta(hours=10)).normalize()
     df = df[df.index <= today_aest]
 
     # Interpolate interior gaps; drop leading/trailing NaN (no extrapolation)
