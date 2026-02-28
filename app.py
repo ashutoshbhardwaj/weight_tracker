@@ -52,7 +52,7 @@ days = (df["Date"].iloc[-1] - df["Date"].iloc[0]).days
 avg_loss_per_week = total_loss / (days / 7) if days > 0 else 0
 
 # ── Header ──────────────────────────────────────────────────────────────────
-st.title("⚖️ Weight Tracker Dashboard")
+st.title("⚖️ AB's Transformation Journey - Weight Tracker")
 st.caption(
     f"Journey from {df['Date'].iloc[0].strftime('%b %d, %Y')} "
     f"to {df['Date'].iloc[-1].strftime('%b %d, %Y')} · {days} days"
@@ -114,7 +114,7 @@ weekly = (
 )
 weekly["Change"] = weekly["Weight"].diff()   # negative = lost weight, positive = gained
 weekly = weekly.dropna(subset=["Change"])
-weekly["Week"] = weekly["Date"].dt.strftime("w/c %b %d")
+weekly["Week"] = weekly["Date"].dt.strftime("%b %d")
 weekly["Color"] = weekly["Change"].apply(
     lambda x: "#F44336" if x > 0 else "#4CAF50"
 )
