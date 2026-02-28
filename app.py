@@ -8,6 +8,24 @@ SHEET_URL = (
     "/pub?gid=0&single=true&output=csv"
 )
 
+
+def check_password() -> bool:
+    if st.session_state.get("authenticated"):
+        return True
+    st.title("⚖️ AB's Transformation Journey - Weight Tracker")
+    pwd = st.text_input("Enter password", type="password")
+    if pwd:
+        if pwd == st.secrets["password"]:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Incorrect password")
+    return False
+
+
+if not check_password():
+    st.stop()
+
 st.set_page_config(
     page_title="Weight Tracker",
     page_icon="⚖️",
