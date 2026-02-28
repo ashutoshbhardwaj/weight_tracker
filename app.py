@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import numpy as np
 
 SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/"
@@ -170,6 +171,100 @@ fig_weekly.update_layout(
     margin=dict(t=10),
 )
 st.plotly_chart(fig_weekly, use_container_width=True)
+
+st.divider()
+
+# ── Monthly change chart ──────────────────────────────────────────────────────
+st.subheader("Monthly Weight Change")
+
+today_aest = (pd.Timestamp.now('UTC').replace(tzinfo=None) + pd.Timedelta(hours=10)).normalize()
+current_month_start = today_aest.replace(day=1)
+
+# First and last recorded weight per calendar month
+monthly_first = df.set_index("Date")["Weight"].resample("MS").first()
+monthly_last  = df.set_index("Date")["Weight"].resample("MS").last()
+monthly = pd.DataFrame({"First": monthly_first, "Last": monthly_last}).reset_index()
+monthly["Change"] = monthly["Last"] - monthly["First"]
+monthly["Month"]  = monthly["Date"].dt.strftime("%b %Y")
+
+past_months = monthly[monthly["Date"] < current_month_start].copy()
+curr_row    = monthly[monthly["Date"] == current_month_start]
+
+# Trend-based projection for remaining days in current month
+actual_change   = 0.0
+proj_additional = 0.0
+curr_month_label = current_month_start.strftime("%b %Y")
+
+current_data = df[df["Date"] >= current_month_start].copy()
+if len(current_data) >= 2:
+    actual_change = float(current_data["Weight"].iloc[-1] - current_data["Weight"].iloc[0])
+
+    # Slope from last 14 days (or all current-month data if less)
+    trend_data = df[df["Date"] >= today_aest - pd.Timedelta(days=13)].copy()
+    if len(trend_data) >= 2:
+        x = (trend_data["Date"] - trend_data["Date"].iloc[0]).dt.days.values.astype(float)
+        slope = np.polyfit(x, trend_data["Weight"].values, 1)[0]  # kg per day
+    else:
+        slope = 0.0
+
+    last_day_of_month = (current_month_start + pd.DateOffset(months=1)) - pd.Timedelta(days=1)
+    days_remaining    = (last_day_of_month - current_data["Date"].iloc[-1]).days
+    proj_additional   = slope * days_remaining
+
+fig_monthly = go.Figure()
+
+# Past months — solid bars
+fig_monthly.add_trace(go.Bar(
+    x=past_months["Month"],
+    y=past_months["Change"],
+    marker_color=past_months["Change"].apply(lambda v: "#F44336" if v > 0 else "#4CAF50"),
+    name="Monthly Change",
+    text=past_months["Change"].apply(lambda v: f"{v:+.2f} kg"),
+    textposition="outside",
+    hovertemplate="%{x}<br>Change: <b>%{y:+.2f} kg</b><extra></extra>",
+))
+
+# Current month — actual so far (solid)
+actual_color = "#F44336" if actual_change > 0 else "#4CAF50"
+fig_monthly.add_trace(go.Bar(
+    x=[curr_month_label],
+    y=[actual_change],
+    marker_color=actual_color,
+    name="Current (actual)",
+    text=[f"{actual_change:+.2f} kg"],
+    textposition="outside",
+    hovertemplate="%{x}<br>Actual so far: <b>%{y:+.2f} kg</b><extra></extra>",
+))
+
+# Current month — projected remaining (semi-transparent, stacked)
+if days_remaining := (
+    ((current_month_start + pd.DateOffset(months=1)) - pd.Timedelta(days=1)) - today_aest
+).days:
+    proj_color = "rgba(76,175,80,0.35)" if proj_additional <= 0 else "rgba(244,67,54,0.35)"
+    fig_monthly.add_trace(go.Bar(
+        x=[curr_month_label],
+        y=[proj_additional],
+        marker_color=proj_color,
+        marker_line=dict(color="#888888", width=1),
+        name="Projected",
+        hovertemplate=(
+            f"{curr_month_label}<br>"
+            f"Projected additional: <b>{proj_additional:+.2f} kg</b>"
+            f"<br>Expected month total: <b>{actual_change + proj_additional:+.2f} kg</b>"
+            "<extra></extra>"
+        ),
+    ))
+
+fig_monthly.add_hline(y=0, line_width=1, line_color="gray")
+fig_monthly.update_layout(
+    barmode="relative",
+    xaxis_title="Month",
+    yaxis_title="Weight Change (kg)",
+    height=380,
+    margin=dict(t=10, b=60),
+    legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+)
+st.plotly_chart(fig_monthly, use_container_width=True)
 
 st.divider()
 
