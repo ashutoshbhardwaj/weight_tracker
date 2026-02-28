@@ -191,25 +191,29 @@ past_months = monthly[monthly["Date"] < current_month_start].copy()
 curr_row    = monthly[monthly["Date"] == current_month_start]
 
 # Trend-based projection for remaining days in current month
-actual_change   = 0.0
-proj_additional = 0.0
+actual_change    = 0.0
+proj_additional  = 0.0
 curr_month_label = current_month_start.strftime("%b %Y")
 
 current_data = df[df["Date"] >= current_month_start].copy()
-if len(current_data) >= 2:
+last_day_of_month = (current_month_start + pd.DateOffset(months=1)) - pd.Timedelta(days=1)
+
+if not current_data.empty:
     actual_change = float(current_data["Weight"].iloc[-1] - current_data["Weight"].iloc[0])
+    last_entry    = current_data["Date"].iloc[-1]
+else:
+    last_entry = current_month_start - pd.Timedelta(days=1)
 
-    # Slope from last 14 days (or all current-month data if less)
-    trend_data = df[df["Date"] >= today_aest - pd.Timedelta(days=13)].copy()
-    if len(trend_data) >= 2:
-        x = (trend_data["Date"] - trend_data["Date"].iloc[0]).dt.days.values.astype(float)
-        slope = np.polyfit(x, trend_data["Weight"].values, 1)[0]  # kg per day
-    else:
-        slope = 0.0
+# Slope always derived from last 14 days (spans into prior month if needed)
+trend_data = df[df["Date"] >= today_aest - pd.Timedelta(days=13)].copy()
+if len(trend_data) >= 2:
+    x = (trend_data["Date"] - trend_data["Date"].iloc[0]).dt.days.values.astype(float)
+    slope = float(np.polyfit(x, trend_data["Weight"].values, 1)[0])  # kg per day
+else:
+    slope = 0.0
 
-    last_day_of_month = (current_month_start + pd.DateOffset(months=1)) - pd.Timedelta(days=1)
-    days_remaining    = (last_day_of_month - current_data["Date"].iloc[-1]).days
-    proj_additional   = slope * days_remaining
+days_remaining  = int((last_day_of_month - last_entry).days)
+proj_additional = slope * days_remaining
 
 fig_monthly = go.Figure()
 
@@ -237,9 +241,7 @@ fig_monthly.add_trace(go.Bar(
 ))
 
 # Current month — projected remaining (semi-transparent, stacked)
-if days_remaining := (
-    ((current_month_start + pd.DateOffset(months=1)) - pd.Timedelta(days=1)) - today_aest
-).days:
+if days_remaining > 0:
     proj_color = "rgba(76,175,80,0.35)" if proj_additional <= 0 else "rgba(244,67,54,0.35)"
     fig_monthly.add_trace(go.Bar(
         x=[curr_month_label],
