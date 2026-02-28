@@ -8,6 +8,8 @@ SHEET_URL = (
     "/pub?gid=0&single=true&output=csv"
 )
 
+import time
+
 
 def check_password() -> bool:
     if st.session_state.get("authenticated"):
@@ -38,8 +40,9 @@ st.set_page_config(
 
 
 @st.cache_data(ttl=3600)
-def load_data() -> pd.DataFrame:
-    df = pd.read_csv(SHEET_URL, parse_dates=["Date"])
+def load_data(cache_buster: int = 0) -> pd.DataFrame:
+    url = f"{SHEET_URL}&cb={cache_buster}"
+    df = pd.read_csv(url, parse_dates=["Date"])
 
     # Drop rows with no date, coerce weight to numeric
     df = df.dropna(subset=["Date"])
@@ -54,8 +57,9 @@ def load_data() -> pd.DataFrame:
     df = df.reindex(full_range)
     df.index.name = "Date"
 
-    # Clip to today — ignore future-dated entries
-    df = df[df.index <= pd.Timestamp.today().normalize()]
+    # Clip to today (AEST = UTC+10) — ignore future-dated entries
+    today_aest = (pd.Timestamp.utcnow() + pd.Timedelta(hours=10)).normalize()
+    df = df[df.index <= today_aest]
 
     # Interpolate interior gaps; drop leading/trailing NaN (no extrapolation)
     df["Weight"] = df["Weight"].interpolate(method="time")
@@ -65,7 +69,7 @@ def load_data() -> pd.DataFrame:
 
 
 # ── Load ────────────────────────────────────────────────────────────────────
-df = load_data()
+df = load_data(st.session_state.get("cache_buster", 0))
 
 start_weight = df["Weight"].iloc[0]
 current_weight = df["Weight"].iloc[-1]
@@ -74,7 +78,7 @@ days = (df["Date"].iloc[-1] - df["Date"].iloc[0]).days
 avg_loss_per_week = total_loss / (days / 7) if days > 0 else 0
 
 # ── Header ──────────────────────────────────────────────────────────────────
-st.title("⚖️ AB's Transformation Journey - Weight Tracker")
+st.title("⚖️ AB's Transformation Journey - Weight Timeline")
 
 col_caption, col_refresh = st.columns([6, 1])
 with col_caption:
@@ -84,7 +88,7 @@ with col_caption:
     )
 with col_refresh:
     if st.button("⟳ Refresh", use_container_width=True):
-        load_data.clear()
+        st.session_state["cache_buster"] = int(time.time())
         st.rerun()
 
 # ── Metric cards ─────────────────────────────────────────────────────────────
