@@ -12,6 +12,10 @@ SHEET_URL = (
 def check_password() -> bool:
     if st.session_state.get("authenticated"):
         return True
+    # Allow authentication via ?pwd=... query parameter
+    if st.query_params.get("pwd") == st.secrets["password"]:
+        st.session_state["authenticated"] = True
+        return True
     st.title("⚖️ AB's Transformation Journey - Weight Tracker")
     pwd = st.text_input("Enter password", type="password")
     if pwd:
