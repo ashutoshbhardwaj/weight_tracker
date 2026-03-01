@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 import re
-import glob as _glob
+import io
 
 SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/"
@@ -134,14 +134,32 @@ def _parse_scan_pdf(path: str) -> dict:
 
 @st.cache_data(ttl=3600)
 def load_scan_data(cache_buster: int = 0) -> pd.DataFrame:
+    from googleapiclient.discovery import build
+    from google.oauth2 import service_account
+
+    creds = service_account.Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/drive.readonly"],
+    )
+    drive = build("drive", "v3", credentials=creds)
+    folder_id = st.secrets["google_drive_folder_id"]
+
+    results = drive.files().list(
+        q=f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false",
+        fields="files(id, name)",
+        orderBy="name",
+    ).execute()
+
     records = []
-    for path in sorted(_glob.glob("Scan *.pdf")):
-        m = re.search(r'Scan (\d{4}-\d{2}-\d{2})\.pdf', path)
+    for f in results.get("files", []):
+        m = re.search(r'Scan (\d{4}-\d{2}-\d{2})\.pdf', f["name"])
         if not m:
             continue
-        data = _parse_scan_pdf(path)
+        content = io.BytesIO(drive.files().get_media(fileId=f["id"]).execute())
+        data = _parse_scan_pdf(content)
         data['date'] = pd.Timestamp(m.group(1))
         records.append(data)
+
     if not records:
         return pd.DataFrame()
     return pd.DataFrame(records).sort_values('date').reset_index(drop=True)
