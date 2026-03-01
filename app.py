@@ -175,7 +175,7 @@ days = (df["Date"].iloc[-1] - df["Date"].iloc[0]).days
 avg_loss_per_week = total_loss / (days / 7) if days > 0 else 0
 
 # ── Header ──────────────────────────────────────────────────────────────────
-st.title("⚖️ AB's Transformation Journey - Weight Timeline")
+st.title("AB's Transformation Journey on Timeline")
 
 col_caption, col_refresh = st.columns([6, 1])
 with col_caption:
