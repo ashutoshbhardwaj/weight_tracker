@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
+import re
+import glob as _glob
 
 SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/e/"
@@ -67,6 +69,82 @@ def load_data(cache_buster: int = 0) -> pd.DataFrame:
     df = df.dropna(subset=["Weight"])
 
     return df.reset_index()
+
+
+# ── Scan PDF parser ──────────────────────────────────────────────────────────
+def _parse_scan_pdf(path: str) -> dict:
+    import pdfplumber
+    with pdfplumber.open(path) as pdf:
+        text = pdf.pages[0].extract_text()
+
+    d = {}
+
+    # Weight from header
+    m = re.search(r'\d{3} cm ([\d.]+) kg', text)
+    if m: d['weight'] = float(m.group(1))
+
+    # LBM, BFM, SMM, Protein, Mineral, TBW  (1st–6th float/High match)
+    float_high = re.findall(r'([\d]+\.[\d]+) / High \[', text)
+    for i, key in enumerate(['lean_body_mass', 'body_fat_mass', 'skeletal_muscle',
+                              'protein', 'mineral', 'total_body_water']):
+        if i < len(float_high):
+            d[key] = float(float_high[i])
+
+    # Visceral Fat Level
+    m = re.search(r'(\d+) / Over Range', text)
+    if m: d['visceral_fat_level'] = int(m.group(1))
+
+    # Subcutaneous Fat & Visceral Fat Mass (decimal bracket %)
+    dec_bracket = re.findall(r'([\d.]+) \[ \d+\.\d+% \]', text)
+    if len(dec_bracket) >= 1: d['subcutaneous_fat'] = float(dec_bracket[0])
+    if len(dec_bracket) >= 2: d['visceral_fat_mass'] = float(dec_bracket[1])
+
+    # Visceral Fat Area
+    m = re.search(r'(\d+) / High \[50 - 100\]', text)
+    if m: d['visceral_fat_area'] = int(m.group(1))
+
+    # BMR + BWI Score (BWI sits on the same line as BMR in the extracted text)
+    m = re.search(r'(\d{4}) kCal ([\d.]+)\n10', text)
+    if m:
+        d['bmr'] = int(m.group(1))
+        d['bwi_score'] = float(m.group(2))
+
+    # TEE (second 4-digit kCal value)
+    kcals = re.findall(r'(\d{4}) kCal', text)
+    if len(kcals) >= 2: d['tee'] = int(kcals[1])
+
+    # Body Fat %
+    m = re.search(r'([\d.]+)% / High \[15 - 20\]', text)
+    if m: d['body_fat_pct'] = float(m.group(1))
+
+    # Bio Age (appears as standalone number right after ICF label)
+    m = re.search(r'INTRACELLULAR FLUID \(ICF\) KG/LBS\n(\d+)\n', text)
+    if m: d['bio_age'] = int(m.group(1))
+
+    # Abdominal Circumference
+    m = re.search(r'([\d.]+) cm \(Greater than 102 cm\)', text)
+    if m: d['abdominal_circ'] = float(m.group(1))
+
+    # Waist-Hip Ratio
+    m = re.search(r'([\d.]+) / High \[0\.75 - 0\.9\]', text)
+    if m: d['waist_hip_ratio'] = float(m.group(1))
+
+    return d
+
+
+@st.cache_data(ttl=3600)
+def load_scan_data(cache_buster: int = 0) -> pd.DataFrame:
+    records = []
+    for path in sorted(_glob.glob("Scan *.pdf")):
+        m = re.search(r'Scan (\d{4}-\d{2}-\d{2})\.pdf', path)
+        if not m:
+            continue
+        data = _parse_scan_pdf(path)
+        data['date'] = pd.Timestamp(m.group(1))
+        records.append(data)
+    if not records:
+        return pd.DataFrame()
+    return pd.DataFrame(records).sort_values('date').reset_index(drop=True)
 
 
 # ── Load ────────────────────────────────────────────────────────────────────
@@ -269,6 +347,186 @@ fig_monthly.update_layout(
 st.plotly_chart(fig_monthly, use_container_width=True)
 
 st.divider()
+
+# ── Body Composition (Scan Data) ──────────────────────────────────────────────
+scans = load_scan_data(st.session_state.get("cache_buster", 0))
+
+if not scans.empty:
+    st.header("Body Composition Scans")
+    st.caption(
+        f"{len(scans)} scans · "
+        f"{scans['date'].iloc[0].strftime('%b %d, %Y')} → "
+        f"{scans['date'].iloc[-1].strftime('%b %d, %Y')} · "
+        "Drop a new 'Scan YYYY-MM-DD.pdf' in the project folder and hit ⟳ Refresh"
+    )
+
+    first, latest = scans.iloc[0], scans.iloc[-1]
+
+    # Metric cards — row 1
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Body Fat %",      f"{latest['body_fat_pct']:.1f}%",
+              delta=f"{latest['body_fat_pct'] - first['body_fat_pct']:.1f}%",
+              delta_color="inverse")
+    s2.metric("Body Fat Mass",   f"{latest['body_fat_mass']:.1f} kg",
+              delta=f"{latest['body_fat_mass'] - first['body_fat_mass']:.1f} kg",
+              delta_color="inverse")
+    s3.metric("Lean Body Mass",  f"{latest['lean_body_mass']:.1f} kg",
+              delta=f"{latest['lean_body_mass'] - first['lean_body_mass']:.1f} kg")
+    s4.metric("Visceral Fat Area", f"{int(latest['visceral_fat_area'])} cm²",
+              delta=f"{latest['visceral_fat_area'] - first['visceral_fat_area']:.0f} cm²",
+              delta_color="inverse")
+
+    # Metric cards — row 2
+    s5, s6, s7, s8 = st.columns(4)
+    s5.metric("BWI Score",       f"{latest['bwi_score']:.1f}/10",
+              delta=f"{latest['bwi_score'] - first['bwi_score']:.1f}")
+    s6.metric("Abdominal Circ.", f"{latest['abdominal_circ']:.1f} cm",
+              delta=f"{latest['abdominal_circ'] - first['abdominal_circ']:.1f} cm",
+              delta_color="inverse")
+    s7.metric("Skeletal Muscle", f"{latest['skeletal_muscle']:.1f} kg",
+              delta=f"{latest['skeletal_muscle'] - first['skeletal_muscle']:.1f} kg")
+    s8.metric("BMR",             f"{int(latest['bmr'])} kCal",
+              delta=f"{latest['bmr'] - first['bmr']:.0f} kCal",
+              delta_color="inverse")
+
+    st.divider()
+
+    scans['label'] = scans['date'].dt.strftime('%b %d, %Y')
+    dates = scans['label']
+
+    # ── Chart 1: Body Composition Split ──────────────────────────────────────
+    st.subheader("Body Composition Split")
+    fig_comp = go.Figure()
+    fig_comp.add_trace(go.Bar(
+        name="Lean Body Mass", x=dates, y=scans['lean_body_mass'],
+        marker_color="#4C9BE8",
+        text=scans['lean_body_mass'].apply(lambda v: f"{v:.1f} kg"),
+        textposition="inside", insidetextanchor="middle",
+    ))
+    fig_comp.add_trace(go.Bar(
+        name="Body Fat Mass", x=dates, y=scans['body_fat_mass'],
+        marker_color="#FF7043",
+        text=scans['body_fat_mass'].apply(lambda v: f"{v:.1f} kg"),
+        textposition="inside", insidetextanchor="middle",
+    ))
+    fig_comp.add_trace(go.Scatter(
+        name="Total Weight", x=dates, y=scans['weight'],
+        mode="lines+markers+text",
+        text=scans['weight'].apply(lambda v: f"{v:.1f} kg"),
+        textposition="top center",
+        line=dict(color="white", width=2, dash="dot"),
+        marker=dict(size=8, color="white"),
+    ))
+    fig_comp.update_layout(
+        barmode="stack",
+        xaxis_title="Scan Date", yaxis_title="Mass (kg)",
+        height=420, margin=dict(t=10, b=60),
+        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+    )
+    st.plotly_chart(fig_comp, use_container_width=True)
+
+    st.divider()
+
+    col_l, col_r = st.columns(2)
+
+    # ── Chart 2: Visceral Fat Trend ───────────────────────────────────────────
+    with col_l:
+        st.subheader("Visceral Fat Trend")
+        fig_visc = go.Figure()
+        fig_visc.add_hrect(
+            y0=50, y1=100, fillcolor="#4CAF50", opacity=0.12, line_width=0,
+            annotation_text="Optimal range (50–100 cm²)", annotation_position="top left",
+        )
+        fig_visc.add_trace(go.Scatter(
+            x=dates, y=scans['visceral_fat_area'],
+            mode="lines+markers+text",
+            text=scans['visceral_fat_area'].apply(lambda v: f"{int(v)} cm²"),
+            textposition="top center",
+            line=dict(color="#FF7043", width=2), marker=dict(size=10),
+            hovertemplate="%{x}<br>Visceral Fat Area: <b>%{y} cm²</b><extra></extra>",
+        ))
+        fig_visc.update_layout(
+            xaxis_title="Scan Date", yaxis_title="Visceral Fat Area (cm²)",
+            showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_visc, use_container_width=True)
+
+    # ── Chart 3: Body Fat % Timeline ─────────────────────────────────────────
+    with col_r:
+        st.subheader("Body Fat %")
+        fig_bfpct = go.Figure()
+        fig_bfpct.add_hrect(
+            y0=11, y1=22.9, fillcolor="#4CAF50", opacity=0.12, line_width=0,
+            annotation_text="Normal range (11–22.9%)", annotation_position="top left",
+        )
+        fig_bfpct.add_trace(go.Scatter(
+            x=dates, y=scans['body_fat_pct'],
+            mode="lines+markers+text",
+            text=scans['body_fat_pct'].apply(lambda v: f"{v:.1f}%"),
+            textposition="top center",
+            line=dict(color="#FF7043", width=2), marker=dict(size=10),
+            hovertemplate="%{x}<br>Body Fat: <b>%{y:.1f}%</b><extra></extra>",
+        ))
+        fig_bfpct.update_layout(
+            xaxis_title="Scan Date", yaxis_title="Body Fat %",
+            showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_bfpct, use_container_width=True)
+
+    st.divider()
+
+    col_l2, col_r2 = st.columns(2)
+
+    # ── Chart 4: BWI Score ────────────────────────────────────────────────────
+    with col_l2:
+        st.subheader("BWI Score")
+        bwi_colors = ["#F44336" if v < 6 else "#FF7043" if v < 7
+                       else "#FFA726" if v < 8 else "#4CAF50"
+                       for v in scans['bwi_score']]
+        fig_bwi = go.Figure()
+        fig_bwi.add_hrect(y0=0,   y1=5.9,  fillcolor="#F44336", opacity=0.06, line_width=0)
+        fig_bwi.add_hrect(y0=5.9, y1=6.9,  fillcolor="#FF7043", opacity=0.06, line_width=0)
+        fig_bwi.add_hrect(y0=6.9, y1=7.9,  fillcolor="#FFA726", opacity=0.06, line_width=0)
+        fig_bwi.add_hrect(y0=7.9, y1=10,   fillcolor="#4CAF50", opacity=0.06, line_width=0)
+        for score, label in [(5.9, "Poor"), (6.9, "Below Avg"), (7.9, "Average")]:
+            fig_bwi.add_hline(y=score, line_dash="dot", line_color="gray",
+                              annotation_text=label, annotation_position="right")
+        fig_bwi.add_trace(go.Bar(
+            x=dates, y=scans['bwi_score'],
+            marker_color=bwi_colors,
+            text=scans['bwi_score'].apply(lambda v: f"{v:.1f}/10"),
+            textposition="outside",
+            hovertemplate="%{x}<br>BWI Score: <b>%{y:.1f}/10</b><extra></extra>",
+        ))
+        fig_bwi.update_layout(
+            xaxis_title="Scan Date", yaxis_title="BWI Score (/10)",
+            yaxis_range=[0, 10], showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_bwi, use_container_width=True)
+
+    # ── Chart 5: Abdominal Circumference ─────────────────────────────────────
+    with col_r2:
+        st.subheader("Abdominal Circumference")
+        fig_abd = go.Figure()
+        fig_abd.add_hline(
+            y=102, line_dash="dash", line_color="#4CAF50",
+            annotation_text="Risk threshold (102 cm)", annotation_position="bottom right",
+        )
+        fig_abd.add_trace(go.Scatter(
+            x=dates, y=scans['abdominal_circ'],
+            mode="lines+markers+text",
+            text=scans['abdominal_circ'].apply(lambda v: f"{v:.1f} cm"),
+            textposition="top center",
+            line=dict(color="#FF7043", width=2), marker=dict(size=10),
+            hovertemplate="%{x}<br>Abdominal Circ: <b>%{y:.1f} cm</b><extra></extra>",
+        ))
+        fig_abd.update_layout(
+            xaxis_title="Scan Date", yaxis_title="Circumference (cm)",
+            showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_abd, use_container_width=True)
+
+    st.divider()
 
 # ── Raw data expander ────────────────────────────────────────────────────────
 with st.expander("View raw data"):
