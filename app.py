@@ -546,6 +546,99 @@ if not scans.empty:
 
     st.divider()
 
+    col_l3, col_r3 = st.columns(2)
+
+    # ── Chart 6: Skeletal Muscle Mass ────────────────────────────────────────
+    with col_l3:
+        st.subheader("Skeletal Muscle Mass")
+        fig_smm = go.Figure()
+        fig_smm.add_hrect(
+            y0=28.0, y1=34.2, fillcolor="#4CAF50", opacity=0.12, line_width=0,
+            annotation_text="Normal range (28.0–34.2 kg)", annotation_position="top left",
+        )
+        fig_smm.add_trace(go.Scatter(
+            x=dates, y=scans['skeletal_muscle'],
+            mode="lines+markers+text",
+            text=scans['skeletal_muscle'].apply(lambda v: f"{v:.1f} kg"),
+            textposition="top center",
+            line=dict(color="#4C9BE8", width=2), marker=dict(size=10),
+            hovertemplate="%{x}<br>Skeletal Muscle: <b>%{y:.1f} kg</b><extra></extra>",
+        ))
+        fig_smm.update_layout(
+            xaxis_title="Scan Date", yaxis_title="Skeletal Muscle Mass (kg)",
+            showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_smm, use_container_width=True)
+
+    # ── Chart 7: Subcutaneous Fat ─────────────────────────────────────────────
+    with col_r3:
+        st.subheader("Subcutaneous Fat Mass")
+        fig_subcut = go.Figure()
+        fig_subcut.add_trace(go.Scatter(
+            x=dates, y=scans['subcutaneous_fat'],
+            mode="lines+markers+text",
+            text=scans['subcutaneous_fat'].apply(lambda v: f"{v:.1f} kg"),
+            textposition="top center",
+            line=dict(color="#FF7043", width=2), marker=dict(size=10),
+            hovertemplate="%{x}<br>Subcutaneous Fat: <b>%{y:.1f} kg</b><extra></extra>",
+        ))
+        fig_subcut.update_layout(
+            xaxis_title="Scan Date", yaxis_title="Subcutaneous Fat (kg)",
+            showlegend=False, height=380, margin=dict(t=10),
+        )
+        st.plotly_chart(fig_subcut, use_container_width=True)
+
+    st.divider()
+
+    # ── Chart 8: All Key Metrics — Normalised % Change from First Scan ────────
+    st.subheader("All Key Metrics — % Change from First Scan")
+    st.caption(
+        "Every metric normalised to % change relative to your first scan. "
+        "For fat metrics, trending down is progress. For muscle & BWI, flat or up is the goal."
+    )
+
+    norm_metrics = [
+        # (column,             label,               color,     )
+        ("weight",            "Weight",             "#90CAF9"  ),
+        ("body_fat_mass",     "Body Fat Mass",      "#EF5350"  ),
+        ("body_fat_pct",      "Body Fat %",         "#FF7043"  ),
+        ("visceral_fat_area", "Visceral Fat Area",  "#B71C1C"  ),
+        ("visceral_fat_mass", "Visceral Fat Mass",  "#E57373"  ),
+        ("subcutaneous_fat",  "Subcutaneous Fat",   "#FFAB91"  ),
+        ("abdominal_circ",    "Abdominal Circ.",    "#FFD54F"  ),
+        ("skeletal_muscle",   "Skeletal Muscle",    "#4C9BE8"  ),
+        ("lean_body_mass",    "Lean Body Mass",     "#66BB6A"  ),
+        ("bwi_score",         "BWI Score",          "#AB47BC"  ),
+    ]
+
+    fig_norm = go.Figure()
+    fig_norm.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot",
+                       annotation_text="Baseline (first scan)", annotation_position="right")
+
+    for col, label, color in norm_metrics:
+        baseline = scans[col].iloc[0]
+        pct = ((scans[col] - baseline) / baseline * 100).round(1)
+        fig_norm.add_trace(go.Scatter(
+            x=dates, y=pct,
+            mode="lines+markers",
+            name=label,
+            line=dict(color=color, width=2),
+            marker=dict(size=8),
+            hovertemplate=f"%{{x}}<br>{label}: <b>%{{y:+.1f}}%</b><extra></extra>",
+        ))
+
+    fig_norm.update_layout(
+        xaxis_title="Scan Date",
+        yaxis_title="% Change from First Scan",
+        hovermode="x unified",
+        height=480,
+        margin=dict(t=10, b=80),
+        legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
+    )
+    st.plotly_chart(fig_norm, use_container_width=True)
+
+    st.divider()
+
 # ── Raw data expander ────────────────────────────────────────────────────────
 with st.expander("View raw data"):
     display = df[["Date", "Weight"]].copy()
